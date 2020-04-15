@@ -21,7 +21,7 @@ namespace {
     // This function is invoked once per function compiled
     // The LLVM IR of the input functions is ready and it can be analyzed and/or transformed
     bool runOnFunction (Function &F) override {
-	errs() << "Function " << "\"" << F.getName() << "\"" << "\n";
+      errs() << "Function " << "\"" << F.getName() << "\"" << "\n";
       F.print(errs());
       return false;
     }
