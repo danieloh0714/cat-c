@@ -24,57 +24,39 @@ namespace {
 
     // This function is invoked once per function compiled
     // The LLVM IR of the input functions is ready and it can be analyzed and/or transformed
+    
     bool runOnFunction (Function &F) override {
       int addCount = 0;
       int subCount = 0;
       int newCount = 0;
       int getCount = 0;
       int setCount = 0;
+
+      DominatorTree& DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
       
       for (auto& bb : F) {
-	  for (auto& I : bb) {
-	      if (isa<CallInst> (I)) {
-		      CallInst *callInst = cast<CallInst>(&I);
-		      Function *calledFunction = callInst->getCalledFunction();
+	  if (DT.getNode(&bb) != NULL) {
+	      for (auto& I : bb) {
+		  if (isa<CallInst>(I)) {
+		      CallInst* callInst = cast<CallInst>(&I);
+		      Function* calledFunction = callInst->getCalledFunction();
 		      std::string calledName = calledFunction->getName();
-		      if (calledName == "CAT_add") {
-			  addCount++;
-		      }
-		      else if (calledName == "CAT_sub") {
-			  subCount++;
-		      }
-		      else if (calledName == "CAT_new") {
-			  newCount++;
-		      }
-		      else if (calledName == "CAT_get") {
-			  getCount++;
-		      }
-		      else if (calledName == "CAT_set") {
-			  setCount++;
-		      }
+		      if (calledName == "CAT_add") addCount++;
+		      else if (calledName == "CAT_sub") subCount++;
+		      else if (calledName == "CAT_new") newCount++;
+		      else if (calledName == "CAT_get") getCount++;
+		      else if (calledName == "CAT_set") setCount++;
+		  }
 	      }
 	  }
-
-	  std::string funcName = F.getName();
-	  
-	  if (addCount > 0) {
-	      errs() << "H1: \"" << funcName << "\": CAT_add: " << addCount << "\n";
-	  }
-	  if (subCount > 0) {
-	      errs() << "H1: \"" << funcName << "\": CAT_sub: " << subCount << "\n";
-	  }
-	  if (newCount > 0) {
-	      errs() << "H1: \"" << funcName << "\": CAT_new: " << newCount << "\n";
-	  }
-	  if (getCount > 0) {
-	      errs() << "H1: \"" << funcName << "\": CAT_get: " << getCount << "\n";
-	  }
-	  if (setCount > 0) {
-	      errs() << "H1: \"" << funcName << "\": CAT_set: " << setCount << "\n";
-	  }
-	  
-	  break;
       }
+
+      std::string funcName = F.getName();
+      if (addCount > 0) errs() << "H1: \"" << funcName << "\": CAT_add: " << addCount << "\n";
+      if (subCount > 0)	errs() << "H1: \"" << funcName << "\": CAT_sub: " << subCount << "\n";
+      if (newCount > 0) errs() << "H1: \"" << funcName << "\": CAT_new: " << newCount << "\n";
+      if (getCount > 0) errs() << "H1: \"" << funcName << "\": CAT_get: " << getCount << "\n";
+      if (setCount > 0) errs() << "H1: \"" << funcName << "\": CAT_set: " << setCount << "\n";
             
       return false;
     }
@@ -82,6 +64,7 @@ namespace {
     // We don't modify the program, so we preserve all analyses.
     // The LLVM IR of functions isn't ready at this point
     void getAnalysisUsage(AnalysisUsage &AU) const override {
+      AU.addRequired<DominatorTreeWrapperPass>();
       AU.setPreservesAll();
     }
   };
