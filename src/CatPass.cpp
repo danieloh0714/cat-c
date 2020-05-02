@@ -17,6 +17,8 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <bitset>
+#include <utility>
 
 using namespace llvm;
 
@@ -40,8 +42,22 @@ namespace {
 
 	DominatorTree& DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 
+	int instCount = 0;
 	for (auto& B : F) {
 	    for (auto& I : B) {
+		instCount++;
+	    }
+	}
+
+	std::map<int, std::pair<llvm::BitVector, llvm::BitVector>> genKillMap; // pair.first is GEN; pair.second is KILL
+	std::map<int, Instruction*> instMap;
+	int instIndex = 0;
+
+	for (auto& B : F) {
+	    for (auto& I : B) {
+		genKillMap[instIndex].first = llvm::BitVector(instCount); // GEN
+		genKillMap[instIndex].second = llvm::BitVector(instCount); // KILL
+		instMap[instIndex] = &I;
 		errs() << "INSTRUCTION: " << I << "\n";
 		errs() << "***************** GEN\n{\n";
 		if (isa<CallInst>(I)) {
@@ -49,6 +65,7 @@ namespace {
 		    Function* calledFunction = callInst->getCalledFunction();
 		    std::string calledName = calledFunction->getName();
 		    if (calledName == "CAT_new" || calledName == "CAT_add" || calledName == "CAT_sub" || calledName == "CAT_set") {
+			genKillMap[instIndex].first.set(instIndex);
 			errs() << " " << I << "\n";
 		    }
 		}
@@ -59,6 +76,7 @@ namespace {
 		    CallInst* callInst = cast<CallInst>(&I);
 		    Function* calledFunction = callInst->getCalledFunction();
 		    std::string calledName = calledFunction->getName();
+		    int killInstIndex = 0;
 		    if (calledName == "CAT_new" || calledName == "CAT_add" || calledName == "CAT_sub" || calledName == "CAT_set") {
 			if (calledName == "CAT_new") {
 			    Instruction* modVariable = &I;
@@ -70,10 +88,12 @@ namespace {
 					std::string calledName2 = calledFunction2->getName();
 					if (calledName2 == "CAT_add" || calledName2 == "CAT_sub" || calledName2 == "CAT_set") {
 					    if (modVariable == cast<Instruction>(callInst2->getArgOperand(0))) {
+						genKillMap[instIndex].second.set(killInstIndex);
 						errs() << " " << i << "\n";
 					    }
 					}
 				    }
+				    killInstIndex++;
 				}
 			    }
 			}
@@ -87,23 +107,53 @@ namespace {
 					std::string calledName2 = calledFunction2->getName();
 					if (calledName2 == "CAT_new") {
 					    if (modVariable == &i) {
+						genKillMap[instIndex].second.set(killInstIndex);
 						errs() << " " << i << "\n";
 					    }
 					}
 					if (calledName2 == "CAT_add" || calledName2 == "CAT_sub" || calledName2 == "CAT_set") {
 					    if (&i != &I && modVariable == cast<Instruction>(callInst2->getArgOperand(0))) {
+						genKillMap[instIndex].second.set(killInstIndex);
 						errs() << " " << i << "\n";
 					    }
 					}
 				    }
+				    killInstIndex++;
 				}
 			    }
 			}
 		    }
 		}
 		errs() << "}\n**************************************\n\n\n\n";
+		instIndex++;
 	    }
 	}
+
+	/* Tested to make sure GEN and KILL sets were properly stored.
+	 * Everything printed as expected and passed the tests.
+	instIndex = 0;
+	for (auto& B : F) {
+	    for (auto& I : B) {
+		errs() << "INSTRUCTION: " << I << "\n";
+		errs() << "***************** GEN\n{\n";
+		for (int i = 0; i < instCount; i++) {
+		    if (genKillMap[instIndex].first[i]) {
+			errs() << " " << *instMap[i] << "\n";
+		    }
+		}
+		errs() << "}\n";
+		errs() << "**************************************\n";
+		errs() << "***************** KILL\n{\n";
+		for (int i = 0; i < instCount; i++) {
+		    if (genKillMap[instIndex].second[i]) {
+			errs() << " " << *instMap[i] << "\n";
+		    }
+		}
+		errs() << "}\n**************************************\n\n\n\n";
+		instIndex++;
+	    }
+	}
+	*/
 
 	return false;
     }
