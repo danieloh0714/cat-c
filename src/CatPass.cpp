@@ -1,12 +1,22 @@
 #include "llvm/Pass.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/ADT/SmallBitVector.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/SparseBitVector.h"
+#include <set>
+#include <unordered_set>
+#include <vector>
+#include <map>
+#include <unordered_map>
 
 using namespace llvm;
 
@@ -19,6 +29,7 @@ namespace {
     // This function is invoked once at the initialization phase of the compiler
     // The LLVM IR of functions isn't ready at this point
     bool doInitialization (Module &M) override {
+	std::map<, >
 	return false;
     }
 
@@ -26,39 +37,76 @@ namespace {
     // The LLVM IR of the input functions is ready and it can be analyzed and/or transformed
     
     bool runOnFunction (Function &F) override {
-      int addCount = 0;
-      int subCount = 0;
-      int newCount = 0;
-      int getCount = 0;
-      int setCount = 0;
+	errs() << "Function \"" << F.getName() << "\" \n";
 
-      DominatorTree& DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-      
-      for (auto& bb : F) {
-	  if (DT.getNode(&bb) != NULL) {
-	      for (auto& I : bb) {
-		  if (isa<CallInst>(I)) {
-		      CallInst* callInst = cast<CallInst>(&I);
-		      Function* calledFunction = callInst->getCalledFunction();
-		      std::string calledName = calledFunction->getName();
-		      if (calledName == "CAT_add") addCount++;
-		      else if (calledName == "CAT_sub") subCount++;
-		      else if (calledName == "CAT_new") newCount++;
-		      else if (calledName == "CAT_get") getCount++;
-		      else if (calledName == "CAT_set") setCount++;
-		  }
-	      }
-	  }
-      }
+	DominatorTree& DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 
-      std::string funcName = F.getName();
-      if (addCount > 0) errs() << "H1: \"" << funcName << "\": CAT_add: " << addCount << "\n";
-      if (subCount > 0)	errs() << "H1: \"" << funcName << "\": CAT_sub: " << subCount << "\n";
-      if (newCount > 0) errs() << "H1: \"" << funcName << "\": CAT_new: " << newCount << "\n";
-      if (getCount > 0) errs() << "H1: \"" << funcName << "\": CAT_get: " << getCount << "\n";
-      if (setCount > 0) errs() << "H1: \"" << funcName << "\": CAT_set: " << setCount << "\n";
-            
-      return false;
+	for (auto& B : F) {
+	    for (auto& I : B) {
+		errs() << "INSTRUCTION: " << I << "\n";
+		errs() << "***************** GEN\n{\n";
+		if (isa<CallInst>(I)) {
+		    CallInst* callInst = cast<CallInst>(&I);
+		    Function* calledFunction = callInst->getCalledFunction();
+		    std::string calledName = calledFunction->getName();
+		    if (calledName == "CAT_new" || calledName == "CAT_add" || calledName == "CAT_sub" || calledName == "CAT_set") {
+			errs() << " " << I << "\n";
+		    }
+		}
+		errs() << "}\n";
+		errs() << "**************************************\n";
+		errs() << "***************** KILL\n{\n";
+		if (isa<CallInst>(I)) {
+		    CallInst* callInst = cast<CallInst>(&I);
+		    Function* calledFunction = callInst->getCalledFunction();
+		    std::string calledName = calledFunction->getName();
+		    if (calledName == "CAT_new" || calledName == "CAT_add" || calledName == "CAT_sub" || calledName == "CAT_set") {
+			if (calledName == "CAT_new") {
+			    Instruction* modVariable = &I;
+			    for (auto& bb : F) {
+				for (auto& i : bb) {
+				    if (isa<CallInst>(i)) {
+					CallInst* callInst2 = cast<CallInst>(&i);
+					Function* calledFunction2 = callInst2->getCalledFunction();
+					std::string calledName2 = calledFunction2->getName();
+					if (calledName2 == "CAT_add" || calledName2 == "CAT_sub" || calledName2 == "CAT_set") {
+					    if (modVariable == cast<Instruction>(callInst2->getArgOperand(0))) {
+						errs() << " " << i << "\n";
+					    }
+					}
+				    }
+				}
+			    }
+			}
+			else {
+			    Instruction* modVariable = cast<Instruction>(callInst->getArgOperand(0));
+			    for (auto& bb : F) {
+				for (auto& i : bb) {
+				    if (isa<CallInst>(i)) {
+					CallInst* callInst2 = cast<CallInst>(&i);
+					Function* calledFunction2 = callInst2->getCalledFunction();
+					std::string calledName2 = calledFunction2->getName();
+					if (calledName2 == "CAT_new") {
+					    if (modVariable == &i) {
+						errs() << " " << i << "\n";
+					    }
+					}
+					if (calledName2 == "CAT_add" || calledName2 == "CAT_sub" || calledName2 == "CAT_set") {
+					    if (&i != &I && modVariable == cast<Instruction>(callInst2->getArgOperand(0))) {
+						errs() << " " << i << "\n";
+					    }
+					}
+				    }
+				}
+			    }
+			}
+		    }
+		}
+		errs() << "}\n**************************************\n\n\n\n";
+	    }
+	}
+
+	return false;
     }
 
     // We don't modify the program, so we preserve all analyses.
