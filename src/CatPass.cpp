@@ -104,8 +104,8 @@ namespace {
 		errs() << "}\n**************************************\n\n\n\n";
 	    }
 	}
-	
-		return false;
+
+	return false;
     }
 
     // We don't modify the program, so we preserve all analyses.
