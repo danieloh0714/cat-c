@@ -53,25 +53,21 @@ namespace {
 	std::map<int, Instruction*> instMap;
 	int instIndex = 0;
 
+	// Compute GEN and KILL sets for each instruction.
 	for (auto& B : F) {
 	    for (auto& I : B) {
-		genKillMap[instIndex].first = llvm::BitVector(instCount); // GEN
-		genKillMap[instIndex].second = llvm::BitVector(instCount); // KILL
+		genKillMap[instIndex].first = llvm::BitVector(instCount); // Initialize GEN set.
+		genKillMap[instIndex].second = llvm::BitVector(instCount); // Initialize KILL set.
 		instMap[instIndex] = &I;
-		errs() << "INSTRUCTION: " << I << "\n";
-		errs() << "***************** GEN\n{\n";
+	
 		if (isa<CallInst>(I)) {
 		    CallInst* callInst = cast<CallInst>(&I);
 		    Function* calledFunction = callInst->getCalledFunction();
 		    std::string calledName = calledFunction->getName();
 		    if (calledName == "CAT_new" || calledName == "CAT_add" || calledName == "CAT_sub" || calledName == "CAT_set") {
 			genKillMap[instIndex].first.set(instIndex);
-			errs() << " " << I << "\n";
 		    }
 		}
-		errs() << "}\n";
-		errs() << "**************************************\n";
-		errs() << "***************** KILL\n{\n";
 		if (isa<CallInst>(I)) {
 		    CallInst* callInst = cast<CallInst>(&I);
 		    Function* calledFunction = callInst->getCalledFunction();
@@ -89,7 +85,6 @@ namespace {
 					if (calledName2 == "CAT_add" || calledName2 == "CAT_sub" || calledName2 == "CAT_set") {
 					    if (modVariable == cast<Instruction>(callInst2->getArgOperand(0))) {
 						genKillMap[instIndex].second.set(killInstIndex);
-						errs() << " " << i << "\n";
 					    }
 					}
 				    }
@@ -108,13 +103,11 @@ namespace {
 					if (calledName2 == "CAT_new") {
 					    if (modVariable == &i) {
 						genKillMap[instIndex].second.set(killInstIndex);
-						errs() << " " << i << "\n";
 					    }
 					}
 					if (calledName2 == "CAT_add" || calledName2 == "CAT_sub" || calledName2 == "CAT_set") {
 					    if (&i != &I && modVariable == cast<Instruction>(callInst2->getArgOperand(0))) {
 						genKillMap[instIndex].second.set(killInstIndex);
-						errs() << " " << i << "\n";
 					    }
 					}
 				    }
@@ -124,26 +117,21 @@ namespace {
 			}
 		    }
 		}
-		errs() << "}\n**************************************\n\n\n\n";
 		instIndex++;
 	    }
 	}
 
-	/* Tested to make sure GEN and KILL sets were properly stored.
-	 * Everything printed as expected and passed the tests.
+	// Print GEN and KILL sets for each instruction.
 	instIndex = 0;
 	for (auto& B : F) {
 	    for (auto& I : B) {
-		errs() << "INSTRUCTION: " << I << "\n";
-		errs() << "***************** GEN\n{\n";
+		errs() << "INSTRUCTION: " << I << "\n***************** GEN\n{\n";
 		for (int i = 0; i < instCount; i++) {
 		    if (genKillMap[instIndex].first[i]) {
 			errs() << " " << *instMap[i] << "\n";
 		    }
 		}
-		errs() << "}\n";
-		errs() << "**************************************\n";
-		errs() << "***************** KILL\n{\n";
+		errs() << "}\n**************************************\n***************** KILL\n{\n";
 		for (int i = 0; i < instCount; i++) {
 		    if (genKillMap[instIndex].second[i]) {
 			errs() << " " << *instMap[i] << "\n";
@@ -153,7 +141,6 @@ namespace {
 		instIndex++;
 	    }
 	}
-	*/
 
 	return false;
     }
