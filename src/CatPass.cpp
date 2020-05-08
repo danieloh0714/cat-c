@@ -72,7 +72,6 @@ namespace {
 			instGKIO[&I].first.first.set(instIndex);
 		    }
 		}
-		// Finished computing GEN set.
 
 		// Compute KILL set.
 		if (isa<CallInst>(I)) {
@@ -124,7 +123,6 @@ namespace {
 			}
 		    }
 		}
-		// Finished computing KILL set.
 
 		instIndex++;
 	    }
@@ -132,7 +130,6 @@ namespace {
 
 	// Compute IN and OUT sets for each instruction.
 	bool outChange = true; // if any changes to OUT occur
-	int iteration = 0;
 
 	do {
 		outChange = false;
@@ -140,30 +137,30 @@ namespace {
 			bool firstInst = true;
 			Instruction* prevInst;
 			for (auto& I : B) {
-				instGKIO[&I].second.first.reset();
-				if (firstInst) {
+				// Compute IN for instruction I.
+				instGKIO[&I].second.first.reset(); // reset IN to all zeros
+				if (firstInst) { // if I is the first instruction in its BB, IN = U (all predecessors of BB) OUT
 					for (auto pred : predecessors(&B)) {
 						instGKIO[&I].second.first |= instGKIO[pred->getTerminator()].second.second;
 					}
-					prevInst = &I;
+					firstInst = false;
 				}
-				else {
+				else { // if I is not the first instruction in its BB, then IN = OUT of previous instruction
 					instGKIO[&I].second.first |= instGKIO[prevInst].second.second;
-					prevInst = &I;
 				}
-				llvm::BitVector oldOut = instGKIO[&I].second.second;
+				prevInst = &I;
 
-				llvm::BitVector kill = instGKIO[&I].first.second;
-				llvm::BitVector in = instGKIO[&I].second.first;
-				llvm::BitVector gen = instGKIO[&I].first.first;
+				//Compute OUT for instruction I.
+				llvm::BitVector oldOut = instGKIO[&I].second.second; // bitwise operations store the value in the first operand, so we create copies
+				llvm::BitVector killCopy = instGKIO[&I].first.second;
+				llvm::BitVector inCopy = instGKIO[&I].second.first;
+				llvm::BitVector genCopy = instGKIO[&I].first.first;
 
-				in &= kill.flip();
-				gen |= in;
-				
-				instGKIO[&I].second.second = gen;
+				inCopy &= killCopy.flip(); // IN - KILL
+				genCopy |= inCopy; // GEN U (IN - KILL)
+				instGKIO[&I].second.second = genCopy; // OUT = GEN U (IN - KILL)
 
 				if (oldOut != instGKIO[&I].second.second) {outChange = true;}
-				firstInst = false;
 			}
 		}
 	} while (outChange);
