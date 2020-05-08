@@ -49,25 +49,32 @@ namespace {
 	    }
 	}
 
-	std::map<int, std::pair<llvm::BitVector, llvm::BitVector>> genKillMap; // pair.first is GEN; pair.second is KILL
+	std::map<Instruction*, std::pair<std::pair<llvm::BitVector, llvm::BitVector>, std::pair<llvm::BitVector, llvm::BitVector>>> instGKIO; // <<GEN, KILL>, <IN, OUT>>
 	std::map<int, Instruction*> instMap;
 	int instIndex = 0;
 
 	// Compute GEN and KILL sets for each instruction.
 	for (auto& B : F) {
 	    for (auto& I : B) {
-		genKillMap[instIndex].first = llvm::BitVector(instCount); // Initialize GEN set.
-		genKillMap[instIndex].second = llvm::BitVector(instCount); // Initialize KILL set.
+		instGKIO[&I].first.first = llvm::BitVector(instCount); // Initialize GEN set.
+		instGKIO[&I].first.second = llvm::BitVector(instCount); // Initialize KILL set.
+		instGKIO[&I].second.first = llvm::BitVector(instCount); // Initialize IN set.
+		instGKIO[&I].second.second = llvm::BitVector(instCount); // Initialize OUT set.
+
 		instMap[instIndex] = &I;
 	
+		// Compute GEN set.
 		if (isa<CallInst>(I)) {
 		    CallInst* callInst = cast<CallInst>(&I);
 		    Function* calledFunction = callInst->getCalledFunction();
 		    std::string calledName = calledFunction->getName();
 		    if (calledName == "CAT_new" || calledName == "CAT_add" || calledName == "CAT_sub" || calledName == "CAT_set") {
-			genKillMap[instIndex].first.set(instIndex);
+			instGKIO[&I].first.first.set(instIndex);
 		    }
 		}
+		// Finished computing GEN set.
+
+		// Compute KILL set.
 		if (isa<CallInst>(I)) {
 		    CallInst* callInst = cast<CallInst>(&I);
 		    Function* calledFunction = callInst->getCalledFunction();
@@ -84,7 +91,7 @@ namespace {
 					std::string calledName2 = calledFunction2->getName();
 					if (calledName2 == "CAT_add" || calledName2 == "CAT_sub" || calledName2 == "CAT_set") {
 					    if (modVariable == cast<Instruction>(callInst2->getArgOperand(0))) {
-						genKillMap[instIndex].second.set(killInstIndex);
+						instGKIO[&I].first.second.set(killInstIndex);
 					    }
 					}
 				    }
@@ -102,12 +109,12 @@ namespace {
 					std::string calledName2 = calledFunction2->getName();
 					if (calledName2 == "CAT_new") {
 					    if (modVariable == &i) {
-						genKillMap[instIndex].second.set(killInstIndex);
+						instGKIO[&I].first.second.set(killInstIndex);
 					    }
 					}
 					if (calledName2 == "CAT_add" || calledName2 == "CAT_sub" || calledName2 == "CAT_set") {
 					    if (&i != &I && modVariable == cast<Instruction>(callInst2->getArgOperand(0))) {
-						genKillMap[instIndex].second.set(killInstIndex);
+						instGKIO[&I].first.second.set(killInstIndex);
 					    }
 					}
 				    }
@@ -117,29 +124,69 @@ namespace {
 			}
 		    }
 		}
+		// Finished computing KILL set.
+
 		instIndex++;
 	    }
 	}
 
-	// Print GEN and KILL sets for each instruction.
-	instIndex = 0;
+	// Compute IN and OUT sets for each instruction.
+	bool outChange = true; // if any changes to OUT occur
+	int iteration = 0;
+
+	do {
+		outChange = false;
+		for (auto& B : F) {
+			bool firstInst = true;
+			Instruction* prevInst;
+			for (auto& I : B) {
+				instGKIO[&I].second.first.reset();
+				if (firstInst) {
+					for (auto pred : predecessors(&B)) {
+						instGKIO[&I].second.first |= instGKIO[pred->getTerminator()].second.second;
+					}
+					prevInst = &I;
+				}
+				else {
+					instGKIO[&I].second.first |= instGKIO[prevInst].second.second;
+					prevInst = &I;
+				}
+				llvm::BitVector oldOut = instGKIO[&I].second.second;
+
+				llvm::BitVector kill = instGKIO[&I].first.second;
+				llvm::BitVector in = instGKIO[&I].second.first;
+				llvm::BitVector gen = instGKIO[&I].first.first;
+
+				in &= kill.flip();
+				gen |= in;
+				
+				instGKIO[&I].second.second = gen;
+
+				if (oldOut != instGKIO[&I].second.second) {outChange = true;}
+				firstInst = false;
+			}
+		}
+	} while (outChange);
+
+	// Print IN and OUT sets for each reachable instruction.
 	for (auto& B : F) {
-	    for (auto& I : B) {
-		errs() << "INSTRUCTION: " << I << "\n***************** GEN\n{\n";
-		for (int i = 0; i < instCount; i++) {
-		    if (genKillMap[instIndex].first[i]) {
-			errs() << " " << *instMap[i] << "\n";
-		    }
+		if (DT.getNode(&B) != NULL) {
+			for (auto& I : B) {
+				errs() << "INSTRUCTION: " << I << "\n***************** IN\n{\n";
+				for (int i = 0; i < instCount; i++) {
+			    		if (instGKIO[&I].second.first[i]) {
+						errs() << " " << *instMap[i] << "\n";
+		    			}
+				}
+				errs() << "}\n**************************************\n***************** OUT\n{\n";
+				for (int i = 0; i < instCount; i++) {
+		    			if (instGKIO[&I].second.second[i]) {
+						errs() << " " << *instMap[i] << "\n";
+		    			}
+				}
+				errs() << "}\n**************************************\n\n\n\n";
+	    		}
 		}
-		errs() << "}\n**************************************\n***************** KILL\n{\n";
-		for (int i = 0; i < instCount; i++) {
-		    if (genKillMap[instIndex].second[i]) {
-			errs() << " " << *instMap[i] << "\n";
-		    }
-		}
-		errs() << "}\n**************************************\n\n\n\n";
-		instIndex++;
-	    }
 	}
 
 	return false;
