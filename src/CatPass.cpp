@@ -4,7 +4,7 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Dominators.h"
-#include "llvm/Analysis/PostDominators.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
@@ -19,22 +19,21 @@ using namespace llvm;
 namespace {
   struct CAT : public FunctionPass {
     static char ID; 
+	Module *currentModule;
 
     CAT() : FunctionPass(ID) {}
 
     // This function is invoked once at the initialization phase of the compiler
     // The LLVM IR of functions isn't ready at this point
     bool doInitialization (Module &M) override {
+		currentModule = &M;
 		return false;
     }
 
     // This function is invoked once per function compiled
     // The LLVM IR of the input functions is ready and it can be analyzed and/or transformed
-    
     bool runOnFunction (Function &F) override {
 		bool modified = false;
-
-		//errs() << "Function \"" << F.getName() << "\" \n";
 
 		DominatorTree& DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 
@@ -49,7 +48,9 @@ namespace {
 		std::map<int, Instruction*> instMap;
 		int instIndex = 0;
 
+		//
 		// Compute GEN and KILL sets for each instruction.
+		//
 		for (auto& B : F) {
 	    	for (auto& I : B) {
 				instGKIO[&I].first.first = llvm::BitVector(instCount); // Initialize GEN set.
@@ -118,7 +119,9 @@ namespace {
 	    	}
 		}
 
+		//
 		// Compute IN and OUT sets for each instruction.
+		//
 		bool outChange = true; // if any changes to OUT occur
 
 		do {
@@ -155,29 +158,10 @@ namespace {
 			}
 		} while (outChange);
 
-		/*// Print IN and OUT sets for each reachable instruction.
-		for (auto& B : F) {
-			if (DT.getNode(&B) != NULL) {
-				for (auto& I : B) {
-					errs() << "INSTRUCTION: " << I << "\n***************** IN\n{\n";
-					for (int i = 0; i < instCount; i++) {
-			    		if (instGKIO[&I].second.first[i]) {
-								errs() << " " << *instMap[i] << "\n";
-		    				}
-					}
-					errs() << "}\n**************************************\n***************** OUT\n{\n";
-					for (int i = 0; i < instCount; i++) {
-		    			if (instGKIO[&I].second.second[i]) {
-							errs() << " " << *instMap[i] << "\n";
-		    			}
-					}
-					errs() << "}\n**************************************\n\n\n\n";
-	    		}
-			}
-		}*/
-		
+		//
 		// Constant propagation.
-		std::vector<Instruction*> toDelete;
+		//
+		std::vector<Instruction*> toDeletePropagation;
 
 		for (auto& B : F) {
 			for (auto& I : B) {
@@ -186,100 +170,117 @@ namespace {
 					std::string calledName = calledFunction->getName();
 
 					if (calledName == "CAT_get") {
-						errs() << "INSTRUCTION: " << I << '\n';
-						
-						errs() << "     USES\n";
-						for (auto& U : callInst->uses()) {
-							errs() << "     " << *U << '\n';
-						}
-						
-						errs() << "     USERS\n";
-						for (auto& U : callInst->uses()) {
-							User* user = U.getUser();
-							auto userInst = cast<Instruction>(user);
-							errs() << "     " << *userInst << '\n';
-						}
-						
-						Value* operand = callInst->getArgOperand(0);
-						Instruction* operandInst = cast<Instruction>(operand);
-						errs() << "     OPERAND\n" << "     " << *operandInst << '\n';
-
-						errs() << "     IN\n";
-						for (int i = 0; i < instCount; i++) {
-			    			if (instGKIO[&I].second.first[i]) {
-								errs() << "     " << *instMap[i] << '\n';
-		    				}
-						}
-
-						errs() << "     MATCH\n";
 						for (int i = 0; i < instCount; i++) {
 							if (instGKIO[&I].second.first[i]) {
 								auto matchCallInst = dyn_cast<CallInst>(instMap[i]);
 								Function* matchCallFunction = matchCallInst->getCalledFunction();
 								std::string matchCallName = matchCallFunction->getName();
+								
+								Value* operand = callInst->getArgOperand(0);
+								Instruction* operandInst = cast<Instruction>(operand);
 
 								if (instMap[i] == operandInst) {
-									errs() << "     " << *instMap[i];
-
 									Value* op = operandInst->getOperand(0);
 									if (auto opInt = dyn_cast<ConstantInt>(op)) {
-										errs() << "     VALUE: " << *opInt << '\n';
-
 										callInst->replaceAllUsesWith(opInt);
-										toDelete.push_back(callInst);
+										toDeletePropagation.push_back(callInst);
+										modified = true;
 									}
 								}
 								else if (matchCallName == "CAT_set") {
 									Value* catSetOp = instMap[i]->getOperand(0);
 									if (auto catSetOpInst = dyn_cast<Instruction>(catSetOp)) {
 										if (catSetOpInst == operandInst) {
-											errs() << "     " << *instMap[i];
-
 											Value* op = instMap[i]->getOperand(1);
 											if (auto opInt = dyn_cast<ConstantInt>(op)) {
-												errs() << "     VALUE: " << *opInt << '\n';
-
 												callInst->replaceAllUsesWith(opInt);
-												toDelete.push_back(callInst);
+												toDeletePropagation.push_back(callInst);
+												modified = true;
 											}
 										}
 									}
 								}
 							}
 						}
-
-
-
-						/*errs() << "     USES\n";
-						for (auto& U : operandInst->uses()) {
-							errs() << "     " << *U << '\n';
-						}
-						
-						errs() << "     USERS\n";
-						for (auto& U : operandInst->uses()) {
-							User* user = U.getUser();
-							auto userInst = cast<Instruction>(user);
-							errs() << "     " << *userInst << '\n';
-						}
-
-						errs() << "     IN\n";
-						for (int i = 0; i < instCount; i++) {
-			    			if (instGKIO[operandInst].second.first[i]) {
-								errs() << "     " << *instMap[i] << "\n";
-		    				}
-						}*/
-
-						errs() << "\n\n\n";
 					}
 				}
 			}
 		}
 
-		for (auto I : toDelete) {
+		// Delete instructions that were replaced.
+		for (auto I : toDeletePropagation) {
 			I->eraseFromParent();
 		}
 
-		modified = true;
+		//
+		// Constant folding.
+		//
+		std::vector<Instruction*> toDeleteFolding;
+
+		// Check if CAT_set is in the module.
+		if (currentModule->getFunction("CAT_set") == NULL) {
+			return modified;
+		}
+
+		// Fold CAT_add and CAT_sub into CAT_set.
+		for (auto& B : F) {
+			for (auto& I : B) {
+				if (auto callInst = dyn_cast<CallInst>(&I)) {
+					Function* calledFunction = callInst->getCalledFunction();
+					std::string calledName = calledFunction->getName();
+					
+					if (calledName == "CAT_add" || calledName == "CAT_sub") {
+						IRBuilder<> builder(callInst);
+
+						bool cont = false;
+						for (int i = 0; i < instCount; i++) {
+							if (instGKIO[&I].second.first[i]) {
+								if (auto inCallInst = dyn_cast<CallInst>(instMap[i])) {
+									std::string inCallName = inCallInst->getCalledFunction()->getName();
+									if (!(inCallName == "CAT_new" || inCallName == "CAT_set")) {
+										cont = true;
+										break;
+									}
+								}
+							}
+						}
+
+						if (cont) {continue;}
+						
+						Value* operandZero = callInst->getOperand(0);
+
+						Value* operandOne = callInst->getOperand(1);
+						Instruction* operandOneInst = cast<Instruction>(operandOne);
+						Value* operandOneInt = dyn_cast<ConstantInt>(operandOneInst->getOperand(0));
+
+						Value* operandTwo = callInst->getOperand(2);
+						Instruction* operandTwoInst = cast<Instruction>(operandTwo);
+						Value* operandTwoInt = dyn_cast<ConstantInt>(operandTwoInst->getOperand(0));
+
+						Value* newValue;
+						if (calledName == "CAT_add") {
+							newValue = builder.CreateAdd(operandOneInt, operandTwoInt);
+						}
+						else {
+							newValue = builder.CreateSub(operandOneInt, operandTwoInt);
+						}
+
+						std::vector<Value*> args = {operandZero, newValue};
+						Value* foldedValue = builder.CreateCall(currentModule->getFunction("CAT_set"), args);
+						auto foldedCallInst = dyn_cast<CallInst>(foldedValue);
+						foldedCallInst->setTailCall();
+
+						toDeleteFolding.push_back(callInst);
+						modified = true;
+					}
+				}
+			}
+		}
+
+		// Delete instructions that were replaced.
+		for (auto I : toDeleteFolding) {
+			I->eraseFromParent();
+		}
 
 		return modified;
     }
